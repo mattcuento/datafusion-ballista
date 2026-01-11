@@ -200,3 +200,79 @@ async fn main() -> Result<()> {
     Ok(())
 }
 ```
+
+### Distributed Substrait Example
+
+```bash
+cargo run --release --example remote-substrait
+```
+
+#### Source code for distributed Substrait example
+
+```rust
+
+use datafusion::execution::SessionStateBuilder;
+use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
+use ballista::datafusion::common::Result;
+use ballista::prelude::SessionContextExt;
+use ballista_core::extension::SessionConfigExt;
+use ballista_core::serde::protobuf::execute_query_params::Query::SubstraitPlan;
+use ballista_core::serde::protobuf::{execute_query_result, ExecuteQueryParams};
+use ballista_core::serde::protobuf::scheduler_grpc_client::SchedulerGrpcClient;
+use ballista_core::utils::{create_grpc_client_connection, GrpcClientConfig};
+use ballista_examples::test_util;
+use datafusion_substrait::serializer::serialize_bytes;
+
+/// Example of passing Substrait plans to Ballista a remote scheduler.
+///
+/// datafusion-substrait is used here to compile the Substrait plan, but any front-end
+/// can be substituted.
+///
+/// For now, Substrait can only be passed directly to the scheduler via a gRPC client.
+#[tokio::main]
+async fn main() -> Result<()> {
+    let config = SessionConfig::new_with_ballista()
+        .with_target_partitions(4)
+        .with_ballista_job_name("Remote substrait Example");
+    let state = SessionStateBuilder::new()
+        .with_config(config)
+        .with_default_features()
+        .build();
+    let ctx = SessionContext::remote_with_state("df://localhost:50050", state).await?;
+    let test_data = test_util::examples_test_data();
+    // register parquet file with the execution context
+    ctx.register_parquet(
+        "test",
+        &format!("{test_data}/alltypes_plain.parquet"),
+        ParquetReadOptions::default(),
+    )
+        .await?;
+
+    // serialize substrait plan via your favorite front-end (eg. Ibis, DuckDB, datafusion-substrait)
+    let plan_bytes = serialize_bytes(
+        "select count(1) from test",
+        &ctx,
+    ).await?;
+
+    // connect directly to scheduler address
+    let connection = create_grpc_client_connection("df://localhost:50050".to_owned(), &GrpcClientConfig::default()).await.expect("Error creating client");
+    let mut scheduler = SchedulerGrpcClient::new(connection);
+
+    let execute_query_params = ExecuteQueryParams {
+        session_id: ctx.session_id(),
+        settings: vec![],
+        operation_id: uuid::Uuid::now_v7().to_string(),
+        // substrain plan available as a plan type!
+        query: Some(SubstraitPlan(plan_bytes)),
+    };
+
+    let response = scheduler
+        .execute_query(execute_query_params)
+        .await
+        .expect("Error executing query");
+    match response.into_inner().result.unwrap() {
+        execute_query_result::Result::Success(_) => Ok(()),
+        execute_query_result::Result::Failure(_) => Err(datafusion::common::DataFusionError::Execution("Failed to execute query".to_string()))
+    }
+}
+```
