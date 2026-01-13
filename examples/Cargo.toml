@@ -33,11 +33,6 @@ name = "standalone_sql"
 path = "examples/standalone-sql.rs"
 required-features = ["ballista/standalone"]
 
-[[example]]
-name = "standalone_substrait"
-path = "examples/remote-substrait.rs"
-required-features = ["ballista/standalone"]
-
 [dependencies]
 
 [dev-dependencies]
@@ -60,8 +55,7 @@ tokio = { workspace = true, features = [
     "parking_lot"
 ] }
 tonic = { workspace = true }
-url = { workspace = true }
-uuid = { workspace = true}
+uuid = { workspace = true }
 
 [features]
 default = []

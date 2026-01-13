@@ -1022,7 +1022,6 @@ dependencies = [
  "testcontainers-modules",
  "tokio",
  "tonic",
- "url",
  "uuid",
 ]
 

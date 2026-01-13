@@ -15,26 +15,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use datafusion::execution::SessionStateBuilder;
-use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
-use ballista::datafusion::common::Result;
+use ballista::datafusion::common::{DataFusionError, Result};
 use ballista::prelude::SessionContextExt;
 use ballista_core::extension::SessionConfigExt;
 use ballista_core::serde::protobuf::execute_query_params::Query::SubstraitPlan;
-use ballista_core::serde::protobuf::{execute_query_result, ExecuteQueryParams};
 use ballista_core::serde::protobuf::scheduler_grpc_client::SchedulerGrpcClient;
-use ballista_core::utils::{create_grpc_client_connection, GrpcClientConfig};
-use ballista_examples::test_util;
+use ballista_core::serde::protobuf::{ExecuteQueryParams, execute_query_result};
+use ballista_core::utils::{GrpcClientConfig, create_grpc_client_connection};
+use datafusion::execution::SessionStateBuilder;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion_substrait::serializer::serialize_bytes;
 
-/// Example of passing Substrait plans to Ballista a remote scheduler.
+/// Example of passing Substrait plans to a remote Ballista scheduler.
 ///
-/// datafusion-substrait is used here to compile the Substrait plan, but any front-end
-/// can be substituted.
+/// This example demonstrates serializing a LogicalPlan with in-memory data (VALUES clause)
+/// to Substrait format and executing it on a remote scheduler via gRPC.
 ///
-/// For now, Substrait can only be passed directly to the scheduler via a gRPC client.
+/// datafusion-substrait is used here to serialize the plan, but any Substrait-compliant
+/// front-end can be substituted.
+///
+/// Note: For now, Substrait plans must be submitted directly to the scheduler via gRPC client,
+/// not through the regular SessionContext remote API. The implementation currently does not
+/// support named table references.
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Now create the remote context for execution
     let config = SessionConfig::new_with_ballista()
         .with_target_partitions(4)
         .with_ballista_job_name("Remote substrait Example");
@@ -43,39 +48,37 @@ async fn main() -> Result<()> {
         .with_default_features()
         .build();
     let ctx = SessionContext::remote_with_state("df://localhost:50050", state).await?;
-    let test_data = test_util::examples_test_data();
-    // register parquet file with the execution context
-    ctx.register_parquet(
-        "test",
-        &format!("{test_data}/alltypes_plain.parquet"),
-        ParquetReadOptions::default(),
+
+    // Serialize SQL into encoded Substrait plan. Substitute with your favorite Substrait producer.
+    let substrait_bytes = serialize_bytes("SELECT 'double_field', 'string_field' FROM (VALUES (1.5, 'foo'), (2.5, 'bar'), (3.5, 'baz')) AS t(double_field, string_field)", &ctx).await?;
+
+    let connection = create_grpc_client_connection(
+        "df://localhost:50050".to_owned(),
+        &GrpcClientConfig::default(),
     )
-        .await?;
-
-    // serialize substrait plan via your favorite front-end (eg. Ibis, DuckDB, datafusion-substrait)
-    let plan_bytes = serialize_bytes(
-        "select count(1) from test",
-        &ctx,
-    ).await?;
-
-    // connect directly to scheduler address
-    let connection = create_grpc_client_connection("df://localhost:50050".to_owned(), &GrpcClientConfig::default()).await.expect("Error creating client");
+    .await
+    .expect("Error creating client");
     let mut scheduler = SchedulerGrpcClient::new(connection);
 
     let execute_query_params = ExecuteQueryParams {
         session_id: ctx.session_id(),
         settings: vec![],
         operation_id: uuid::Uuid::now_v7().to_string(),
-        // substrain plan available as a plan type!
-        query: Some(SubstraitPlan(plan_bytes)),
+        // Substrait plan available as a plan type!
+        query: Some(SubstraitPlan(substrait_bytes)),
     };
-
     let response = scheduler
         .execute_query(execute_query_params)
         .await
         .expect("Error executing query");
+
     match response.into_inner().result.unwrap() {
-        execute_query_result::Result::Success(_) => Ok(()),
-        execute_query_result::Result::Failure(_) => Err(datafusion::common::DataFusionError::Execution("Failed to execute query".to_string()))
+        execute_query_result::Result::Success(_) => {
+            println!("Query executed successfully!");
+            Ok(())
+        }
+        execute_query_result::Result::Failure(failure) => Err(
+            DataFusionError::Execution(format!("Failed to execute query: {:?}", failure)),
+        ),
     }
 }
