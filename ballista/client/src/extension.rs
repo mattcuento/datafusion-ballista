@@ -159,6 +159,23 @@ impl SessionContextExt for SessionContext {
     }
 }
 
+#[cfg(feature = "standalone")]
+/// Extension can be used to set up a standalone in-proc scheduler instance
+/// without attaching it to SessionContext. This can be useful for testing
+/// Ballista with a custom front-end.
+///
+/// ```
+/// use ballista::extension::Extension;
+///
+/// # #[tokio::main]
+/// # async fn main() -> datafusion::error::Result<()> {
+/// let scheduler_url = Extension::setup_standalone(None);
+/// # Ok(())
+/// # }
+/// ```
+pub struct Extension {}
+
+#[cfg(not(feature = "standalone"))]
 struct Extension {}
 
 impl Extension {
@@ -175,7 +192,8 @@ impl Extension {
     }
 
     #[cfg(feature = "standalone")]
-    async fn setup_standalone(
+    /// Creates in-process scheduler and executor.
+    pub async fn setup_standalone(
         session_state: Option<&SessionState>,
     ) -> datafusion::error::Result<String> {
         use ballista_core::{serde::BallistaCodec, utils::default_config_producer};
