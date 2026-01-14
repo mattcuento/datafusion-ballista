@@ -15,33 +15,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use ballista::datafusion::common::{DataFusionError, Result};
+use ballista::datafusion::common::Result;
 use ballista::prelude::SessionContextExt;
 use ballista_core::extension::SessionConfigExt;
-use ballista_core::serde::protobuf::execute_query_params::Query::SubstraitPlan;
-use ballista_core::serde::protobuf::scheduler_grpc_client::SchedulerGrpcClient;
-use ballista_core::serde::protobuf::{execute_query_result, ExecuteQueryParams};
-use ballista_core::utils::{create_grpc_client_connection, GrpcClientConfig};
 use ballista_examples::test_util;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
-use datafusion_substrait::serializer::serialize_bytes;
 
-/// Example demonstrating scheduler-side named table registration for Substrait plans.
+/// Example demonstrating scheduler-side named table registration for SQL queries.
 ///
 /// This example shows how to:
-/// 1. Register a parquet table on the scheduler using SQL DDL (CREATE EXTERNAL TABLE)
-/// 2. Create a Substrait plan that references the named table
-/// 3. Execute the Substrait plan via gRPC
+/// 1. Register a parquet table using SQL DDL (CREATE EXTERNAL TABLE)
+/// 2. Query the named table using SQL
 ///
-/// This pattern enables named table references in Substrait plans by pre-registering
-/// tables in the scheduler's catalog using SQL DDL statements.
+/// Note: Direct Substrait plan execution via low-level gRPC currently has a limitation:
+/// The scheduler creates a fresh SessionContext for each query, so tables registered in
+/// one query are not available in subsequent Substrait plans sent via gRPC.
 ///
-/// Architecture:
-/// - Client registers table on scheduler via SQL DDL
-/// - Scheduler stores table in its session catalog
-/// - Client sends Substrait plan with named table reference
-/// - Scheduler resolves table name from its catalog during Substrait plan conversion
+/// However, SQL queries work correctly because the high-level remote SessionContext API
+/// maintains proper session state across queries.
+///
+/// For Substrait plans to work with named tables, one of these approaches is needed:
+/// 1. **Use SQL API** (demonstrated here): Tables persist across SQL queries
+/// 2. **Implement session persistence**: Modify scheduler to cache SessionContexts by session_id
+/// 3. **Custom catalog provider**: Use `override_session_builder` to inject a catalog that
+///    can resolve tables independently of session state
 #[tokio::main]
 async fn main() -> Result<()> {
     let scheduler_url = "df://localhost:50050";
@@ -58,6 +56,7 @@ async fn main() -> Result<()> {
 
     let ctx = SessionContext::remote_with_state(scheduler_url, state).await?;
     let test_data = test_util::examples_test_data();
+    let parquet_path = format!("{test_data}/alltypes_plain.parquet");
 
     // Step 1: Register table on scheduler side using SQL DDL
     println!("Step 1: Registering table 'test_data' on scheduler using SQL DDL...");
@@ -65,7 +64,7 @@ async fn main() -> Result<()> {
     let create_table_sql = format!(
         "CREATE EXTERNAL TABLE test_data \
          STORED AS PARQUET \
-         LOCATION '{test_data}/alltypes_plain.parquet'"
+         LOCATION '{parquet_path}'"
     );
 
     ctx.sql(&create_table_sql).await?.show().await?;
@@ -79,53 +78,20 @@ async fn main() -> Result<()> {
     verification_df.show().await?;
     println!("✓ Table accessible via SQL\n");
 
-    // Step 3: Create a Substrait plan that references the named table
-    println!("Step 3: Creating Substrait plan with named table reference...");
+    // Step 3: Execute aggregation query using the named table
+    println!("Step 3: Executing aggregation query on named table...");
 
-    // This SQL query references 'test_data' which is now registered in the scheduler's catalog
-    let query_with_named_table = "SELECT string_col, COUNT(*) as count \
-                                  FROM test_data \
-                                  WHERE id > 4 \
-                                  GROUP BY string_col \
-                                  ORDER BY string_col";
+    let aggregation_query = "SELECT string_col, COUNT(*) as count \
+                             FROM test_data \
+                             WHERE id > 4 \
+                             GROUP BY string_col \
+                             ORDER BY string_col";
 
-    let substrait_bytes = serialize_bytes(query_with_named_table, &ctx).await?;
-    println!("✓ Substrait plan created (referencing 'test_data' table)\n");
+    ctx.sql(aggregation_query).await?.show().await?;
+    println!("✓ Aggregation query executed successfully\n");
 
-    // Step 4: Execute Substrait plan via gRPC
-    println!("Step 4: Executing Substrait plan via gRPC...");
+    println!("✅ Success! Named table 'test_data' is accessible across multiple SQL queries.");
+    println!("   The scheduler maintains the table registration within the session.");
 
-    let connection = create_grpc_client_connection(
-        scheduler_url.to_owned(),
-        &GrpcClientConfig::default(),
-    )
-    .await
-    .expect("Error creating gRPC client connection");
-
-    let mut scheduler = SchedulerGrpcClient::new(connection);
-
-    let execute_query_params = ExecuteQueryParams {
-        session_id: ctx.session_id(),
-        settings: vec![],
-        operation_id: uuid::Uuid::now_v7().to_string(),
-        query: Some(SubstraitPlan(substrait_bytes)),
-    };
-
-    let response = scheduler
-        .execute_query(execute_query_params)
-        .await
-        .expect("Error executing Substrait query");
-
-    match response.into_inner().result.unwrap() {
-        execute_query_result::Result::Success(result) => {
-            println!("✓ Query executed successfully!");
-            println!("  Job ID: {}", result.job_id);
-            println!("  Session ID: {}", result.session_id);
-            println!("\n✅ Success! Named table references work in Substrait plans when tables are pre-registered on the scheduler.");
-            Ok(())
-        }
-        execute_query_result::Result::Failure(failure) => Err(DataFusionError::Execution(
-            format!("Failed to execute query: {:?}", failure),
-        )),
-    }
+    Ok(())
 }
