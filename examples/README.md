@@ -158,41 +158,40 @@ async fn main() -> Result<()> {
 }
 ```
 
-### Distributed Substrait with Named Tables Example
+### Distributed Named Tables with SQL Example
 
 ```bash
 cargo run --release --example remote-substrait-named-table
 ```
 
-#### Source code for distributed Substrait with named tables example
+#### Source code for distributed named tables example
 
-This example demonstrates how to use named table references in Substrait plans by pre-registering
-tables on the scheduler using SQL DDL (CREATE EXTERNAL TABLE).
+This example demonstrates how to use named table references across multiple SQL queries
+by registering tables on the scheduler using SQL DDL (CREATE EXTERNAL TABLE).
 
 **Key points:**
-- Tables are registered in the scheduler's catalog using SQL DDL
-- Substrait plans can then reference these named tables
-- The scheduler resolves table names from its catalog during plan execution
+- Tables are registered using SQL DDL (CREATE EXTERNAL TABLE)
+- Named tables persist across SQL queries within the same session
+- Multiple queries can reference the registered table name
+
+**Note:** Direct Substrait plan execution via low-level gRPC currently doesn't support cross-query
+table persistence due to the scheduler creating fresh SessionContexts for each request. Use the
+SQL API for queries with named table references.
 
 ```rust
-use ballista::datafusion::common::{DataFusionError, Result};
+use ballista::datafusion::common::Result;
 use ballista::prelude::SessionContextExt;
 use ballista_core::extension::SessionConfigExt;
-use ballista_core::serde::protobuf::execute_query_params::Query::SubstraitPlan;
-use ballista_core::serde::protobuf::scheduler_grpc_client::SchedulerGrpcClient;
-use ballista_core::serde::protobuf::{execute_query_result, ExecuteQueryParams};
-use ballista_core::utils::{create_grpc_client_connection, GrpcClientConfig};
 use ballista_examples::test_util;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
-use datafusion_substrait::serializer::serialize_bytes;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let scheduler_url = "df://localhost:50050";
     let config = SessionConfig::new_with_ballista()
         .with_target_partitions(4)
-        .with_ballista_job_name("Remote Substrait Named Table Example");
+        .with_ballista_job_name("Remote Named Table Example");
 
     let state = SessionStateBuilder::new()
         .with_config(config)
@@ -202,7 +201,7 @@ async fn main() -> Result<()> {
     let ctx = SessionContext::remote_with_state(scheduler_url, state).await?;
     let test_data = test_util::examples_test_data();
 
-    // Step 1: Register table on scheduler side using SQL DDL
+    // Step 1: Register table using SQL DDL
     let create_table_sql = format!(
         "CREATE EXTERNAL TABLE test_data \
          STORED AS PARQUET \
@@ -210,46 +209,22 @@ async fn main() -> Result<()> {
     );
     ctx.sql(&create_table_sql).await?.show().await?;
 
-    // Step 2: Create Substrait plan that references the named table
-    let query_with_named_table = "SELECT string_col, COUNT(*) as count \
-                                  FROM test_data \
-                                  WHERE id > 4 \
-                                  GROUP BY string_col \
-                                  ORDER BY string_col";
+    // Step 2: Query the named table
+    let verification_df = ctx
+        .sql("SELECT id, string_col FROM test_data WHERE id <= 3")
+        .await?;
+    verification_df.show().await?;
 
-    let substrait_bytes = serialize_bytes(query_with_named_table, &ctx).await?;
+    // Step 3: Execute aggregation query using the named table
+    let aggregation_query = "SELECT string_col, COUNT(*) as count \
+                             FROM test_data \
+                             WHERE id > 4 \
+                             GROUP BY string_col \
+                             ORDER BY string_col";
 
-    // Step 3: Execute Substrait plan via gRPC
-    let connection = create_grpc_client_connection(
-        scheduler_url.to_owned(),
-        &GrpcClientConfig::default(),
-    )
-    .await
-    .expect("Error creating gRPC client connection");
+    ctx.sql(aggregation_query).await?.show().await?;
 
-    let mut scheduler = SchedulerGrpcClient::new(connection);
-
-    let execute_query_params = ExecuteQueryParams {
-        session_id: ctx.session_id(),
-        settings: vec![],
-        operation_id: uuid::Uuid::now_v7().to_string(),
-        query: Some(SubstraitPlan(substrait_bytes)),
-    };
-
-    let response = scheduler
-        .execute_query(execute_query_params)
-        .await
-        .expect("Error executing Substrait query");
-
-    match response.into_inner().result.unwrap() {
-        execute_query_result::Result::Success(_) => {
-            println!("Query executed successfully!");
-            Ok(())
-        }
-        execute_query_result::Result::Failure(failure) => Err(DataFusionError::Execution(
-            format!("Failed to execute query: {:?}", failure),
-        )),
-    }
+    Ok(())
 }
 ```
 
