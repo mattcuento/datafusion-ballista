@@ -994,6 +994,7 @@ dependencies = [
  "rand",
  "rustc_version",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-stream",

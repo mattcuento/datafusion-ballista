@@ -29,6 +29,8 @@ pub fn print_version() {
     println!("Ballista version: {BALLISTA_VERSION}")
 }
 
+/// Catalog providers for managing database schemas and tables.
+pub mod catalog;
 /// Client utilities for connecting to Ballista schedulers.
 pub mod client;
 /// Configuration options and settings for Ballista components.
