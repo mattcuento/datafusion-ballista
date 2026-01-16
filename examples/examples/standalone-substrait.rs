@@ -22,7 +22,6 @@ use ballista_core::serde::protobuf::execute_query_params::Query::SubstraitPlan;
 use ballista_core::serde::protobuf::scheduler_grpc_client::SchedulerGrpcClient;
 use ballista_core::serde::protobuf::{ExecuteQueryParams, execute_query_result};
 use ballista_core::utils::{GrpcClientConfig, create_grpc_client_connection};
-use ballista_examples::test_util;
 use datafusion::execution::SessionState;
 use datafusion::prelude::SessionContext;
 use datafusion_substrait::serializer::serialize_bytes;
@@ -58,37 +57,7 @@ async fn main() -> Result<()> {
     let mut scheduler = SchedulerGrpcClient::new(connection);
 
     // Substitute with your favorite front-end
-    let test_data = test_util::examples_test_data();
-    let create_table_sql = format!(
-        "CREATE EXTERNAL TABLE tbl_test STORED AS PARQUET LOCATION '{test_data}/alltypes_plain.parquet'"
-    );
-    let substrait_plan_bytes = serialize_bytes(&create_table_sql, &front_end).await?;
-
-    let execute_query_params = ExecuteQueryParams {
-        session_id: session_id.to_owned(),
-        settings: vec![],
-        operation_id: uuid::Uuid::now_v7().to_string(),
-        // Substrait plan available as a plan type!
-        query: Some(SubstraitPlan(substrait_plan_bytes)),
-    };
-    let response = scheduler
-        .execute_query(execute_query_params)
-        .await
-        .expect("Error executing query");
-
-    match response.into_inner().result.unwrap() {
-        execute_query_result::Result::Failure(failure) => {
-            return Err(DataFusionError::Execution(format!(
-                "Failed to execute query: {:?}",
-                failure
-            )));
-        }
-        _ => {}
-    }
-
-    // Substitute with your favorite front-end
-    let select_sql = "SELECT COUNT(1) FROM tbl_test";
-    let substrait_plan_bytes = serialize_bytes(select_sql, &front_end).await?;
+    let substrait_plan_bytes = serialize_bytes("SELECT 'double_field', 'string_field' FROM (VALUES (1.5, 'foo'), (2.5, 'bar'), (3.5, 'baz')) AS t(double_field, string_field)", &front_end).await?;
 
     let execute_query_params = ExecuteQueryParams {
         session_id: session_id.to_owned(),

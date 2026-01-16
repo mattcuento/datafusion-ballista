@@ -34,8 +34,8 @@ ballista-executor = { path = "../executor", version = "51.0.0", optional = true 
 ballista-scheduler = { path = "../scheduler", version = "51.0.0", optional = true }
 datafusion = { workspace = true }
 log = { workspace = true }
-
 tokio = { workspace = true }
+tonic = { workspace = true, optional = true }
 url = { workspace = true }
 
 [dev-dependencies]
@@ -49,8 +49,9 @@ tempfile = { workspace = true }
 tonic = { workspace = true }
 
 [features]
-default = ["standalone"]
+default = ["standalone", "substrait"]
 standalone = ["ballista-executor", "ballista-scheduler"]
+substrait = ["ballista-scheduler/substrait", "dep:tonic"]
 # tests which need change of RUST_MIN_STACK in order for 
 # tests to run. 
 test_extended_stack = []

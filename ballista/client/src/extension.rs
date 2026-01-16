@@ -16,7 +16,14 @@
 // under the License.
 
 pub use ballista_core::extension::{SessionConfigExt, SessionStateExt};
+use ballista_core::serde::protobuf::execute_query_params::Query::SubstraitPlan;
 use ballista_core::serde::protobuf::scheduler_grpc_client::SchedulerGrpcClient;
+use ballista_core::serde::protobuf::{ExecuteQueryParams, execute_query_result};
+use ballista_core::utils::{
+    GrpcClientConfig, create_grpc_client_connection, default_config_producer,
+};
+use datafusion::execution::SendableRecordBatchStream;
+use datafusion::functions::string::uuid;
 use datafusion::{
     error::DataFusionError, execution::SessionState, prelude::SessionContext,
 };
@@ -251,4 +258,52 @@ impl Extension {
 
         Ok(scheduler_url)
     }
+}
+
+#[cfg(feature = "substrait")]
+pub struct SubstraitExec {
+    scheduler: SchedulerGrpcClient<tonic::transport::Channel>,
+}
+
+#[cfg(not(feature = "substrait"))]
+struct SubstraitExec {}
+
+impl SubstraitExec {
+    pub async fn new(
+        scheduler_url: String,
+        grpc_client_config: Option<GrpcClientConfig>,
+    ) -> Self {
+        let connection = create_grpc_client_connection(
+            scheduler_url.clone(),
+            &grpc_client_config.unwrap_or_else(|| GrpcClientConfig::default()),
+        )
+        .await
+        .expect("Error creating client");
+        SubstraitExec {
+            scheduler: SchedulerGrpcClient::new(connection),
+        }
+    }
+    // async fn execute_query(&mut self, plan: Vec<u8>, session_id: String) -> datafusion::error::Result<SendableRecordBatchStream> {
+    //     let execute_query_params = ExecuteQueryParams {
+    //         session_id,
+    //         settings: vec![],
+    //         operation_id: uuid::Uuid::now_v7().to_string(),
+    //         // Substrait plan available as a plan type!
+    //         query: Some(SubstraitPlan(plan)),
+    //     };
+    //     let response = self.scheduler
+    //         .execute_query(execute_query_params)
+    //         .await
+    //         .expect("Error executing query");
+    //
+    //     match response.into_inner().result.unwrap() {
+    //         execute_query_result::Result::Success(x) => {
+    //             println!("Query executed successfully!");
+    //             Ok(())
+    //         }
+    //         execute_query_result::Result::Failure(failure) => Err(
+    //             DataFusionError::Execution(format!("Failed to execute query: {:?}", failure)),
+    //         ),
+    //     }
+    // }
 }
