@@ -138,8 +138,8 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "snap",
- "strum",
- "strum_macros",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
  "thiserror 2.0.17",
  "uuid",
  "xz2",
@@ -1011,10 +1011,13 @@ dependencies = [
 name = "ballista-examples"
 version = "51.0.0"
 dependencies = [
+ "arrow-ipc",
+ "async-trait",
  "ballista",
  "ballista-core",
  "ballista-executor",
  "ballista-scheduler",
+ "base64 0.22.1",
  "ctor",
  "datafusion",
  "datafusion-substrait",
@@ -1022,10 +1025,13 @@ dependencies = [
  "futures",
  "log",
  "object_store",
+ "parking_lot",
+ "serde",
+ "serde_json",
  "testcontainers-modules",
  "tokio",
  "tonic",
- "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1472,11 +1478,12 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "comfy-table"
-version = "7.2.1"
+version = "7.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b03b7db8e0b4b2fdad6c551e634134e99ec000e5c8c3b6856c65e8bbaded7a3b"
+checksum = "e0d05af1e006a2407bedef5af410552494ce5be9090444dbbcb57258c1af3d56"
 dependencies = [
- "unicode-segmentation",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
  "unicode-width 0.2.2",
 ]
 
@@ -5243,9 +5250,28 @@ dependencies = [
 
 [[package]]
 name = "strum"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+
+[[package]]
+name = "strum"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+
+[[package]]
+name = "strum_macros"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.113",
+]
 
 [[package]]
 name = "strum_macros"
