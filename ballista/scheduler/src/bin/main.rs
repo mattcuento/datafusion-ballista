@@ -19,13 +19,13 @@
 
 use ballista_core::config::LogRotationPolicy;
 use ballista_core::error::BallistaError;
-use ballista_core::object_store::{
-    session_config_with_s3_support, session_state_with_s3_support,
-};
+use ballista_examples::catalog::FilesystemCatalogList;
 use ballista_scheduler::cluster::BallistaCluster;
 use ballista_scheduler::config::{Config, SchedulerConfig};
 use ballista_scheduler::scheduler_process::start_server;
 use clap::Parser;
+use datafusion::execution::{SessionState, SessionStateBuilder};
+use datafusion::prelude::SessionConfig;
 use std::sync::Arc;
 use std::{env, io};
 use tracing_subscriber::EnvFilter;
@@ -87,11 +87,22 @@ async fn inner() -> ballista_core::error::Result<()> {
 
     let config: SchedulerConfig = opt.try_into()?;
     let config = config
-        .with_override_config_producer(Arc::new(session_config_with_s3_support))
-        .with_override_session_builder(Arc::new(session_state_with_s3_support));
-
+        .with_override_session_builder(Arc::new(session_builder_with_filesystem_catalog));
     let cluster = BallistaCluster::new_from_config(&config).await?;
     start_server(cluster, addr, Arc::new(config)).await?;
 
     Ok(())
+}
+
+/// Default session builder using the provided configuration
+pub fn session_builder_with_filesystem_catalog(
+    config: SessionConfig,
+) -> datafusion::common::Result<SessionState> {
+    Ok(SessionStateBuilder::new()
+        .with_default_features()
+        .with_config(config)
+        .with_catalog_list(Arc::new(FilesystemCatalogList::new(
+            "/tmp/ballista_substrait_catalog",
+        )?))
+        .build())
 }
