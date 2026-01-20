@@ -928,12 +928,14 @@ dependencies = [
  "datafusion",
  "datafusion-proto",
  "env_logger",
+ "futures",
  "log",
  "rstest",
  "tempfile",
  "tokio",
  "tonic",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1015,7 +1017,9 @@ dependencies = [
  "ballista-scheduler",
  "ctor",
  "datafusion",
+ "datafusion-substrait",
  "env_logger",
+ "futures",
  "log",
  "object_store",
  "testcontainers-modules",
