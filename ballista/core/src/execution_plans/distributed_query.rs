@@ -15,12 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::client::BallistaClient;
 use crate::config::BallistaConfig;
-use crate::serde::protobuf::SuccessfulJob;
+use crate::execution_plans::query_executor;
 use crate::serde::protobuf::{
-    ExecuteQueryParams, GetJobStatusParams, GetJobStatusResult, KeyValuePair,
-    PartitionLocation, execute_query_params::Query, execute_query_result, job_status,
+    ExecuteQueryParams, KeyValuePair, execute_query_params::Query, execute_query_result,
     scheduler_grpc_client::SchedulerGrpcClient,
 };
 use crate::utils::{GrpcClientConfig, create_grpc_client_connection};
@@ -43,12 +41,11 @@ use datafusion_proto::logical_plan::{
     AsLogicalPlan, DefaultLogicalExtensionCodec, LogicalExtensionCodec,
 };
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
-use log::{debug, error, info};
+use log::{debug, info};
 use std::any::Any;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// This operator sends a logical plan to a Ballista scheduler for execution and
 /// polls the scheduler until the query is complete and then fetches the resulting
@@ -323,123 +320,22 @@ async fn execute_query(
         "Session id inconsistent between Client and Server side in DistributedQueryExec."
     );
 
-    let job_id = query_result.job_id;
-    let mut prev_status: Option<job_status::Status> = None;
+    // Use shared polling logic from query_executor module
+    let successful_job = query_executor::poll_job(
+        &mut scheduler,
+        query_result.job_id,
+        Some(metrics), // Pass metrics for ExecutionPlan monitoring
+        partition,
+        query_start_time,
+    )
+    .await?;
 
-    loop {
-        let GetJobStatusResult { status } = scheduler
-            .get_job_status(GetJobStatusParams {
-                job_id: job_id.clone(),
-            })
-            .await
-            .map_err(|e| DataFusionError::Execution(format!("{e:?}")))?
-            .into_inner();
-        let status = status.and_then(|s| s.status);
-        let wait_future = tokio::time::sleep(Duration::from_millis(100));
-        let has_status_change = prev_status != status;
-        match status {
-            None => {
-                if has_status_change {
-                    info!("Job {job_id} is in initialization ...");
-                }
-                wait_future.await;
-                prev_status = status;
-            }
-            Some(job_status::Status::Queued(_)) => {
-                if has_status_change {
-                    info!("Job {job_id} is queued...");
-                }
-                wait_future.await;
-                prev_status = status;
-            }
-            Some(job_status::Status::Running(_)) => {
-                if has_status_change {
-                    info!("Job {job_id} is running...");
-                }
-                wait_future.await;
-                prev_status = status;
-            }
-            Some(job_status::Status::Failed(err)) => {
-                let msg = format!("Job {} failed: {}", job_id, err.error);
-                error!("{msg}");
-                break Err(DataFusionError::Execution(msg));
-            }
-            Some(job_status::Status::Successful(SuccessfulJob {
-                queued_at,
-                started_at,
-                ended_at,
-                partition_location,
-                ..
-            })) => {
-                // Calculate job execution time (server-side execution)
-                let job_execution_ms = ended_at.saturating_sub(started_at);
-                let duration = Duration::from_millis(job_execution_ms);
-
-                info!("Job {job_id} finished executing in {duration:?} ");
-
-                // Calculate scheduling time (server-side queue time)
-                // This includes network latency and actual queue time
-                let scheduling_ms = started_at.saturating_sub(queued_at);
-
-                // Calculate total query time (end-to-end from client perspective)
-                let total_elapsed = query_start_time.elapsed();
-                let total_ms = total_elapsed.as_millis();
-
-                // Set timing metrics
-                let metric_job_execution = MetricBuilder::new(&metrics)
-                    .gauge("job_execution_time_ms", partition);
-                metric_job_execution.set(job_execution_ms as usize);
-
-                let metric_scheduling =
-                    MetricBuilder::new(&metrics).gauge("job_scheduling_in_ms", partition);
-                metric_scheduling.set(scheduling_ms as usize);
-
-                let metric_total_time =
-                    MetricBuilder::new(&metrics).gauge("total_query_time_ms", partition);
-                metric_total_time.set(total_ms as usize);
-
-                // Note: data_transfer_time_ms is not set here because partition fetching
-                // happens lazily when the stream is consumed, not during execute_query.
-                // This could be added in a future enhancement by wrapping the stream.
-
-                let streams = partition_location.into_iter().map(move |partition| {
-                    let f = fetch_partition(partition, max_message_size, true)
-                        .map_err(|e| ArrowError::ExternalError(Box::new(e)));
-
-                    futures::stream::once(f).try_flatten()
-                });
-
-                break Ok(futures::stream::iter(streams).flatten());
-            }
-        };
-    }
-}
-
-async fn fetch_partition(
-    location: PartitionLocation,
-    max_message_size: usize,
-    flight_transport: bool,
-) -> Result<SendableRecordBatchStream> {
-    let metadata = location.executor_meta.ok_or_else(|| {
-        DataFusionError::Internal("Received empty executor metadata".to_owned())
-    })?;
-    let partition_id = location.partition_id.ok_or_else(|| {
-        DataFusionError::Internal("Received empty partition id".to_owned())
-    })?;
-    let host = metadata.host.as_str();
-    let port = metadata.port as u16;
-    let mut ballista_client = BallistaClient::try_new(host, port, max_message_size)
-        .await
-        .map_err(|e| DataFusionError::Execution(format!("{e:?}")))?;
-    ballista_client
-        .fetch_partition(
-            &metadata.id,
-            &partition_id.into(),
-            &location.path,
-            host,
-            port,
-            flight_transport,
-        )
-        .await
-        .map_err(|e| DataFusionError::External(Box::new(e)))
+    // Use shared partition fetching logic
+    // Note: Using Flight transport (true) for compatibility with existing behavior
+    query_executor::fetch_partitions(
+        successful_job.partition_location,
+        max_message_size,
+        true,
+    )
+    .await
 }

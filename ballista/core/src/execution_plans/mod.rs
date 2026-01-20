@@ -19,11 +19,13 @@
 //! several Ballista executors.
 
 mod distributed_query;
+mod query_executor;
 mod shuffle_reader;
 mod shuffle_writer;
 mod unresolved_shuffle;
 
 pub use distributed_query::DistributedQueryExec;
+pub use query_executor::{fetch_partitions, poll_job};
 pub use shuffle_reader::ShuffleReaderExec;
 pub use shuffle_writer::ShuffleWriterExec;
 pub use unresolved_shuffle::UnresolvedShuffleExec;
