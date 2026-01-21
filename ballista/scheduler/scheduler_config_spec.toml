@@ -168,3 +168,21 @@ name = "expire_dead_executor_interval_seconds"
 type = "u64"
 doc = "The interval to check expired or dead executors"
 default = "15"
+
+[[param]]
+name = "session_cache_max_entries"
+type = "u64"
+default = "1000"
+doc = "Maximum number of session contexts to cache"
+
+[[param]]
+name = "session_cache_ttl_seconds"
+type = "u64"
+default = "3600"
+doc = "Time-to-live for cached sessions (seconds)"
+
+[[param]]
+name = "session_cache_tti_seconds"
+type = "u64"
+default = "1800"
+doc = "Time-to-idle - sessions not accessed within this time are evicted (seconds)"

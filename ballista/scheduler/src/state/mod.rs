@@ -32,6 +32,7 @@ use crate::state::distributed_explain::{
     generate_distributed_explain_plan,
 };
 use crate::state::executor_manager::ExecutorManager;
+use crate::state::session_cache::SessionCacheConfig;
 use crate::state::session_manager::SessionManager;
 use crate::state::task_manager::{TaskLauncher, TaskManager};
 
@@ -60,6 +61,8 @@ pub mod execution_graph_dot;
 pub mod execution_stage;
 /// Executor registration and management.
 pub mod executor_manager;
+/// Session context caching with LRU + TTL eviction.
+pub mod session_cache;
 /// Session state management.
 pub mod session_manager;
 /// Task scheduling and lifecycle management.
@@ -127,6 +130,11 @@ impl<T: 'static + AsLogicalPlan, U: 'static + AsExecutionPlan> SchedulerState<T,
         scheduler_name: String,
         config: Arc<SchedulerConfig>,
     ) -> Self {
+        let cache_config = SessionCacheConfig::new(
+            config.session_cache_max_entries,
+            config.session_cache_ttl_seconds,
+            config.session_cache_tti_seconds,
+        );
         Self {
             executor_manager: ExecutorManager::new(
                 cluster.cluster_state(),
@@ -137,7 +145,10 @@ impl<T: 'static + AsLogicalPlan, U: 'static + AsExecutionPlan> SchedulerState<T,
                 codec.clone(),
                 scheduler_name,
             ),
-            session_manager: SessionManager::new(cluster.job_state()),
+            session_manager: SessionManager::with_cache_config(
+                cluster.job_state(),
+                cache_config,
+            ),
             codec,
             config,
         }
@@ -161,6 +172,11 @@ impl<T: 'static + AsLogicalPlan, U: 'static + AsExecutionPlan> SchedulerState<T,
         config: Arc<SchedulerConfig>,
         dispatcher: Arc<dyn TaskLauncher>,
     ) -> Self {
+        let cache_config = SessionCacheConfig::new(
+            config.session_cache_max_entries,
+            config.session_cache_ttl_seconds,
+            config.session_cache_tti_seconds,
+        );
         Self {
             executor_manager: ExecutorManager::new(
                 cluster.cluster_state(),
@@ -172,7 +188,10 @@ impl<T: 'static + AsLogicalPlan, U: 'static + AsExecutionPlan> SchedulerState<T,
                 scheduler_name,
                 dispatcher,
             ),
-            session_manager: SessionManager::new(cluster.job_state()),
+            session_manager: SessionManager::with_cache_config(
+                cluster.job_state(),
+                cache_config,
+            ),
             codec,
             config,
         }

@@ -187,6 +187,27 @@ pub struct Config {
         help = "The interval to check expired or dead executors"
     )]
     pub expire_dead_executor_interval_seconds: u64,
+    /// Maximum number of session contexts to cache.
+    #[arg(
+        long,
+        default_value_t = 1000,
+        help = "Maximum number of session contexts to cache"
+    )]
+    pub session_cache_max_entries: u64,
+    /// Time-to-live for cached sessions in seconds.
+    #[arg(
+        long,
+        default_value_t = 3600,
+        help = "Time-to-live for cached sessions (seconds)"
+    )]
+    pub session_cache_ttl_seconds: u64,
+    /// Time-to-idle for cached sessions in seconds.
+    #[arg(
+        long,
+        default_value_t = 1800,
+        help = "Time-to-idle - sessions not accessed within this time are evicted (seconds)"
+    )]
+    pub session_cache_tti_seconds: u64,
 }
 
 /// Configurations for the ballista scheduler of scheduling jobs and tasks
@@ -238,6 +259,13 @@ pub struct SchedulerConfig {
     pub override_logical_codec: Option<Arc<dyn LogicalExtensionCodec>>,
     /// [PhysicalExtensionCodec] override option
     pub override_physical_codec: Option<Arc<dyn PhysicalExtensionCodec>>,
+
+    /// Maximum number of session contexts to cache
+    pub session_cache_max_entries: u64,
+    /// Time-to-live for cached sessions in seconds
+    pub session_cache_ttl_seconds: u64,
+    /// Time-to-idle - sessions not accessed within this time are evicted (seconds)
+    pub session_cache_tti_seconds: u64,
 }
 
 impl Default for SchedulerConfig {
@@ -264,6 +292,9 @@ impl Default for SchedulerConfig {
             override_session_builder: None,
             override_logical_codec: None,
             override_physical_codec: None,
+            session_cache_max_entries: 1000,
+            session_cache_ttl_seconds: 3600,
+            session_cache_tti_seconds: 1800,
         }
     }
 }
@@ -493,6 +524,9 @@ impl TryFrom<Config> for SchedulerConfig {
             override_logical_codec: None,
             override_physical_codec: None,
             override_session_builder: None,
+            session_cache_max_entries: opt.session_cache_max_entries,
+            session_cache_ttl_seconds: opt.session_cache_ttl_seconds,
+            session_cache_tti_seconds: opt.session_cache_tti_seconds,
         };
 
         Ok(config)

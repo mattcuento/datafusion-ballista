@@ -52,6 +52,7 @@ ballista-core = { path = "../core", version = "51.0.0" }
 clap = { workspace = true, optional = true }
 dashmap = { workspace = true }
 datafusion = { workspace = true }
+moka = { version = "0.12", features = ["future"] }
 datafusion-proto = { workspace = true }
 datafusion-substrait = { workspace = true, optional = true }
 futures = { workspace = true }
