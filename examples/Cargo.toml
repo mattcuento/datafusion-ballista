@@ -71,6 +71,7 @@ uuid = { workspace = true }
 
 [features]
 default = ["substrait", "standalone"]
+spark-compat = ["ballista-core/spark-compat"]
 standalone = ["ballista/standalone"]
 substrait = ["ballista-scheduler/substrait"]
 testcontainers = []
